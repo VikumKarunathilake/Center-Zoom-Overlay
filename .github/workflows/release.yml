@@ -1,0 +1,50 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*' # Trigger workflow on version tags, e.g., v1.0.0
+  workflow_dispatch: # Enable manual triggering from GitHub UI
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Setup MSBuild
+      uses: microsoft/setup-msbuild@v2
+
+    - name: Setup NuGet
+      uses: NuGet/setup-nuget@v2
+
+    - name: Restore NuGet Packages
+      run: nuget restore Center-Zoom-Overlay.sln
+
+    - name: Build Application (Release)
+      run: msbuild Center-Zoom-Overlay.sln /p:Configuration=Release /p:Platform="Any CPU"
+
+    - name: Package Release Files
+      shell: pwsh
+      run: |
+        # Create staging directory
+        New-Item -ItemType Directory -Path .\publish
+        
+        # Copy executable and dependency DLL
+        Copy-Item -Path .\bin\Release\Center-Zoom-Overlay.exe -Destination .\publish\
+        Copy-Item -Path .\bin\Release\System.Drawing.Common.dll -Destination .\publish\
+        
+        # Zip the package
+        Compress-Archive -Path .\publish\* -DestinationPath .\Center-Zoom-Overlay.zip
+
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'manual-release' }}
+        files: |
+          Center-Zoom-Overlay.zip
+          bin/Release/Center-Zoom-Overlay.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
