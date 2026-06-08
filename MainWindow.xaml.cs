@@ -212,8 +212,8 @@ namespace Center_Zoom_Overlay
         {
             lock (_bufferLock)
             {
-                // Active zoom factor: uses 1x if zoom toggled off, else uses configured _zoomFactor
-                int activeZoom = _isZoomToggled ? _zoomFactor : 1;
+                // Active zoom factor (always configure buffers for the active zoom factor)
+                int activeZoom = _zoomFactor;
 
                 _captureWidth = _windowPxW / activeZoom;
                 _captureHeight = _windowPxH / activeZoom;
@@ -246,6 +246,12 @@ namespace Center_Zoom_Overlay
                         PixelFormats.Bgr32,
                         null);
                     ZoomDisplay.Source = _writeableBitmap;
+
+                    // Show or hide the zoom scope border while keeping the Window and the central red dot visible
+                    if (ScopeBorder != null)
+                    {
+                        ScopeBorder.Visibility = _isZoomToggled ? Visibility.Visible : Visibility.Collapsed;
+                    }
                 });
             }
         }
@@ -290,6 +296,10 @@ namespace Center_Zoom_Overlay
 
                 lock (_bufferLock)
                 {
+                    // Skip capture loop processing if zoom is toggled off
+                    if (!_isZoomToggled)
+                        goto LoopDelay;
+
                     if (_captureBitmap == null || _captureGraphics == null || _pixelBuffer == null || _writeableBitmap == null)
                         goto LoopDelay;
 
