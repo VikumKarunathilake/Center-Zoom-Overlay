@@ -48,6 +48,7 @@ namespace Center_Zoom_Overlay
         private int _zoomFactor = 2; // Default 2x magnification (range: 2 to 8)
         private const int MinZoom = 2;
         private const int MaxZoom = 8;
+        private bool _isZoomToggled = true; // True = zoomed, False = 1x (no zoom)
 
         private int _captureWidth;
         private int _captureHeight;
@@ -179,17 +180,11 @@ namespace Center_Zoom_Overlay
         {
             if (nCode >= 0 && wParam.ToInt32() == WM_MBUTTONDOWN)
             {
-                // Toggle overlay visibility on middle mouse button down
+                // Toggle zoom active state on middle mouse button down (1x <=> zoomed)
                 Dispatcher.BeginInvoke(new Action(() =>
                 {
-                    if (this.Visibility == Visibility.Visible)
-                    {
-                        this.Visibility = Visibility.Collapsed;
-                    }
-                    else
-                    {
-                        this.Visibility = Visibility.Visible;
-                    }
+                    _isZoomToggled = !_isZoomToggled;
+                    UpdateZoomBuffers();
                 }));
             }
             return CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
@@ -232,9 +227,11 @@ namespace Center_Zoom_Overlay
         {
             lock (_bufferLock)
             {
-                // To zoom by _zoomFactor, capture a smaller screen region
-                _captureWidth = _windowPxW / _zoomFactor;
-                _captureHeight = _windowPxH / _zoomFactor;
+                // Active zoom factor: uses 1x if zoom toggled off, else uses configured _zoomFactor
+                int activeZoom = _isZoomToggled ? _zoomFactor : 1;
+
+                _captureWidth = _windowPxW / activeZoom;
+                _captureHeight = _windowPxH / activeZoom;
 
                 // Ensure widths/heights are even numbers for GDI compatibility
                 if (_captureWidth % 2 != 0) _captureWidth++;

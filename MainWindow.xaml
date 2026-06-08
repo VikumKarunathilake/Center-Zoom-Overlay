@@ -15,8 +15,8 @@
 
     <Grid>
         <!-- Circular Clip to make the image appear like a scope lens -->
-        <Border BorderBrush="#00FF00"
-                BorderThickness="2"
+        <Border BorderBrush="#02000000"
+                BorderThickness="1"
                 CornerRadius="50">
             <Border.Clip>
                 <EllipseGeometry Center="50,50" RadiusX="50" RadiusY="50" />
