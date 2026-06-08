@@ -1,0 +1,33 @@
+## Ignore Visual Studio Temporary Files and Build Output
+# User-specific files
+*.rsuser
+*.suo
+*.user
+*.userresource
+*.sln.docstates
+
+# Build results
+[Dd]ebug/
+[Dd]ebugPublic/
+[Rr]elease/
+[Re]leases/
+x64/
+x86/
+[Aa]rm/
+[Aa]rm64/
+bbin/
+bin/
+obj/
+
+# Visual Studio 2015/2017/2019/2022 cache/options directory
+.vs/
+
+# NuGet Packages
+*.nupkg
+# The packages folder can be rebuilt as NuGet will restore packages
+packages/
+!packages/repositories.config
+
+# Rider/Resharper folders
+.idea/
+*.sln.iml
