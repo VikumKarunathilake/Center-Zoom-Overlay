@@ -23,7 +23,7 @@
             </Border.Clip>
             <Image x:Name="ZoomDisplay"
                    Stretch="Fill"
-                   RenderOptions.BitmapScalingMode="Fant"/>
+                   RenderOptions.BitmapScalingMode="Linear"/>
         </Border>
 
         <Ellipse Width="4"

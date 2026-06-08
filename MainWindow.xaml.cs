@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Media;
@@ -57,6 +58,9 @@ namespace Center_Zoom_Overlay
         private readonly object _bufferLock = new object();
         private Bitmap _captureBitmap;
         private Graphics _captureGraphics;
+        private WriteableBitmap _writeableBitmap;
+        private byte[] _pixelBuffer;
+        private int _pixelBufferStride;
 
         // DPI cache variables
         private double _dpiX = 1.0;
@@ -64,9 +68,13 @@ namespace Center_Zoom_Overlay
         private int _windowPxW;
         private int _windowPxH;
 
+        // Background capture thread
+        private Thread _captureThread;
+        private volatile bool _isRunning;
+        private volatile bool _isUpdatePending;
+
         // Frame-rate throttle
         private readonly Stopwatch _frameClock = Stopwatch.StartNew();
-        private long _lastFrameMs;
 
         public MainWindow()
         {
@@ -78,6 +86,9 @@ namespace Center_Zoom_Overlay
 
         private void MainWindow_Loaded(object sender, RoutedEventArgs e)
         {
+            // Set timer resolution to 1ms to allow precise sleeping (prevent ~15.6ms sleep rounding)
+            timeBeginPeriod(1);
+
             // Use physical pixels directly for everything since we set SetProcessDPIAware()
             PresentationSource ps = PresentationSource.FromVisual(this);
             _dpiX = ps?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
@@ -121,49 +132,37 @@ namespace Center_Zoom_Overlay
             HwndSource source = HwndSource.FromHwnd(hwnd);
             source?.AddHook(HwndMessageHook);
 
-            // --- Register Global Low-Level Mouse Hook for Middle Click Toggle ---
-            _mouseHookProcedure = MouseHookCallback;
-            using (Process currentProcess = Process.GetCurrentProcess())
-            using (ProcessModule currentModule = currentProcess.MainModule)
-            {
-                _mouseHookId = SetWindowsHookEx(
-                    WH_MOUSE_LL,
-                    _mouseHookProcedure,
-                    GetModuleHandle(currentModule.ModuleName),
-                    0);
-            }
 
-            // --- Start the render-synced capture loop ---
-            CompositionTarget.Rendering += OnRenderFrame;
+
+            // --- Start the background capture thread ---
+            _isRunning = true;
+            _captureThread = new Thread(CaptureLoop)
+            {
+                IsBackground = true,
+                Name = "ScreenCaptureThread",
+                Priority = ThreadPriority.AboveNormal
+            };
+            _captureThread.Start();
         }
 
-        // --- Win32 Global Hotkeys & Mouse Hooks ---
+        // --- Win32 Global Hotkeys & Mouse Input State ---
         [DllImport("user32.dll")]
         private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
 
         [DllImport("user32.dll")]
         private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr SetWindowsHookEx(int idHook, LowLevelMouseProc lpfn, IntPtr hMod, uint dwThreadId);
+        [DllImport("user32.dll")]
+        private static extern short GetAsyncKeyState(int vKey);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        [return: MarshalAs(UnmanagedType.Bool)]
-        private static extern bool UnhookWindowsHookEx(IntPtr hhk);
+        [DllImport("winmm.dll", EntryPoint = "timeBeginPeriod")]
+        private static extern uint timeBeginPeriod(uint uPeriod);
 
-        [DllImport("user32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
+        [DllImport("winmm.dll", EntryPoint = "timeEndPeriod")]
+        private static extern uint timeEndPeriod(uint uPeriod);
 
-        [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
-        private static extern IntPtr GetModuleHandle(string lpModuleName);
-
-        private delegate IntPtr LowLevelMouseProc(int nCode, IntPtr wParam, IntPtr lParam);
-
-        private LowLevelMouseProc _mouseHookProcedure;
-        private IntPtr _mouseHookId = IntPtr.Zero;
-
-        private const int WH_MOUSE_LL = 14;
-        private const int WM_MBUTTONDOWN = 0x0207;
+        private const int VK_MBUTTON = 0x04; // Middle mouse button
+        private bool _wasMButtonDown = false;
 
         private const int HOTKEY_ZOOM_UP_PGUP = 9001;
         private const int HOTKEY_ZOOM_DOWN_PGDN = 9002;
@@ -175,20 +174,6 @@ namespace Center_Zoom_Overlay
         private const uint VK_ADD = 0x6B;      // Numpad +
         private const uint VK_SUBTRACT = 0x6D; // Numpad -
         private const int WM_HOTKEY = 0x0312;
-
-        private IntPtr MouseHookCallback(int nCode, IntPtr wParam, IntPtr lParam)
-        {
-            if (nCode >= 0 && wParam.ToInt32() == WM_MBUTTONDOWN)
-            {
-                // Toggle zoom active state on middle mouse button down (1x <=> zoomed)
-                Dispatcher.BeginInvoke(new Action(() =>
-                {
-                    _isZoomToggled = !_isZoomToggled;
-                    UpdateZoomBuffers();
-                }));
-            }
-            return CallNextHookEx(_mouseHookId, nCode, wParam, lParam);
-        }
 
         private IntPtr HwndMessageHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
@@ -237,28 +222,45 @@ namespace Center_Zoom_Overlay
                 if (_captureWidth % 2 != 0) _captureWidth++;
                 if (_captureHeight % 2 != 0) _captureHeight++;
 
-                // Dispose old objects
+                // Dispose old GDI objects
                 _captureGraphics?.Dispose();
                 _captureBitmap?.Dispose();
 
-                // Allocate new buffers with the updated size
+                // Allocate GDI buffer
                 _captureBitmap = new Bitmap(_captureWidth, _captureHeight,
                     System.Drawing.Imaging.PixelFormat.Format32bppRgb);
                 _captureGraphics = Graphics.FromImage(_captureBitmap);
+
+                // Allocate pixel buffer for background-thread-to-UI copy
+                _pixelBufferStride = _captureWidth * 4;
+                _pixelBuffer = new byte[_pixelBufferStride * _captureHeight];
+
+                // Create WriteableBitmap on the UI thread
+                Dispatcher.Invoke(() =>
+                {
+                    _writeableBitmap = new WriteableBitmap(
+                        _captureWidth,
+                        _captureHeight,
+                        96 * _dpiX,
+                        96 * _dpiY,
+                        PixelFormats.Bgr32,
+                        null);
+                    ZoomDisplay.Source = _writeableBitmap;
+                });
             }
         }
 
         private void MainWindow_Closed(object sender, EventArgs e)
         {
-            CompositionTarget.Rendering -= OnRenderFrame;
-
-            // Clean up low-level mouse hook
-            if (_mouseHookId != IntPtr.Zero)
+            _isRunning = false;
+            if (_captureThread != null && _captureThread.IsAlive)
             {
-                UnhookWindowsHookEx(_mouseHookId);
-                _mouseHookId = IntPtr.Zero;
+                _captureThread.Join(500);
             }
-            
+
+            // Restore timer resolution
+            timeEndPeriod(1);
+
             // Clean up global hotkeys
             IntPtr hwnd = new WindowInteropHelper(this).Handle;
             UnregisterHotKey(hwnd, HOTKEY_ZOOM_UP_PGUP);
@@ -271,57 +273,104 @@ namespace Center_Zoom_Overlay
                 _captureGraphics?.Dispose();
                 _captureBitmap?.Dispose();
             }
-        }
-
-        private void OnRenderFrame(object sender, EventArgs e)
+        }        private void CaptureLoop()
         {
-            // Throttle to support up to 144Hz (1000ms / 144fps ≈ 6.94ms)
-            long now = _frameClock.ElapsedMilliseconds;
-            if (now - _lastFrameMs < 6)
-                return;
-            _lastFrameMs = now;
-
-            lock (_bufferLock)
+            while (_isRunning)
             {
-                if (_captureBitmap == null || _captureGraphics == null)
-                    return;
+                long startTime = _frameClock.ElapsedMilliseconds;
 
-                try
+                // Check middle mouse button state to toggle zoom active state (1x <=> zoomed)
+                bool isMButtonDown = (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0;
+                if (isMButtonDown && !_wasMButtonDown)
                 {
-                    // Physical screen dimensions (DPI-aware via SetProcessDPIAware)
-                    int screenW = GetSystemMetrics(SM_CXSCREEN);
-                    int screenH = GetSystemMetrics(SM_CYSCREEN);
+                    _isZoomToggled = !_isZoomToggled;
+                    UpdateZoomBuffers();
+                }
+                _wasMButtonDown = isMButtonDown;
 
-                    int srcX = (screenW / 2) - (_captureWidth / 2);
-                    int srcY = (screenH / 2) - (_captureHeight / 2);
+                lock (_bufferLock)
+                {
+                    if (_captureBitmap == null || _captureGraphics == null || _pixelBuffer == null || _writeableBitmap == null)
+                        goto LoopDelay;
 
-                    // BitBlt the center region into our reusable bitmap
-                    _captureGraphics.CopyFromScreen(
-                        srcX, srcY, 0, 0,
-                        new System.Drawing.Size(_captureWidth, _captureHeight),
-                        CopyPixelOperation.SourceCopy);
-
-                    // Convert GDI HBITMAP → WPF BitmapSource directly (no MemoryStream!)
-                    IntPtr hBitmap = _captureBitmap.GetHbitmap();
                     try
                     {
-                    BitmapSource source = Imaging.CreateBitmapSourceFromHBitmap(
-                        hBitmap,
-                        IntPtr.Zero,
-                        Int32Rect.Empty,
-                        BitmapSizeOptions.FromEmptyOptions());
-                    source.Freeze(); // Required for cross-thread WPF perf
-                    ZoomDisplay.Source = source;
+                        // Physical screen dimensions (DPI-aware via SetProcessDPIAware)
+                        int screenW = GetSystemMetrics(SM_CXSCREEN);
+                        int screenH = GetSystemMetrics(SM_CYSCREEN);
+
+                        int srcX = (screenW / 2) - (_captureWidth / 2);
+                        int srcY = (screenH / 2) - (_captureHeight / 2);
+
+                        // BitBlt the center region into our reusable bitmap
+                        _captureGraphics.CopyFromScreen(
+                            srcX, srcY, 0, 0,
+                            new System.Drawing.Size(_captureWidth, _captureHeight),
+                            CopyPixelOperation.SourceCopy);
+
+                        // Lock GDI bitmap bits and copy to pre-allocated byte array
+                        var rect = new System.Drawing.Rectangle(0, 0, _captureWidth, _captureHeight);
+                        var bmpData = _captureBitmap.LockBits(
+                            rect,
+                            System.Drawing.Imaging.ImageLockMode.ReadOnly,
+                            _captureBitmap.PixelFormat);
+                        try
+                        {
+                            Marshal.Copy(bmpData.Scan0, _pixelBuffer, 0, _pixelBuffer.Length);
+                        }
+                        finally
+                        {
+                            _captureBitmap.UnlockBits(bmpData);
+                        }
+
+                        // Dispatch update to UI thread if no update is currently pending
+                        if (!_isUpdatePending)
+                        {
+                            _isUpdatePending = true;
+
+                            // Capture references for the UI thread closure
+                            byte[] bufferRef = _pixelBuffer;
+                            int stride = _pixelBufferStride;
+                            int w = _captureWidth;
+                            int h = _captureHeight;
+                            WriteableBitmap wbmp = _writeableBitmap;
+
+                            Dispatcher.BeginInvoke(new Action(() =>
+                            {
+                                try
+                                {
+                                    if (wbmp != null && wbmp.PixelWidth == w && wbmp.PixelHeight == h)
+                                    {
+                                        wbmp.WritePixels(
+                                            new Int32Rect(0, 0, w, h),
+                                            bufferRef,
+                                            stride,
+                                            0);
+                                    }
+                                }
+                                finally
+                                {
+                                    _isUpdatePending = false;
+                                }
+                            }), System.Windows.Threading.DispatcherPriority.Render);
+                        }
+                    }
+                    catch
+                    {
+                        // Guard against transient failures: resolution changes, UAC prompts, alt-tabs
+                    }
                 }
-                finally
+
+            LoopDelay:
+                long elapsed = _frameClock.ElapsedMilliseconds - startTime;
+                int sleepMs = (int)(7 - elapsed); // Target ~144Hz (7ms per frame)
+                if (sleepMs > 0)
                 {
-                    // Always release the GDI handle to avoid a handle leak
-                    DeleteObject(hBitmap);
+                    Thread.Sleep(sleepMs);
                 }
-                }
-                catch
+                else
                 {
-                    // Guard against transient failures: resolution changes, UAC prompts, alt-tabs
+                    Thread.Sleep(1);
                 }
             }
         }
