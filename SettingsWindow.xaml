@@ -1,0 +1,145 @@
+<Window x:Class="Center_Zoom_Overlay.SettingsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Settings" Height="520" Width="380"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen">
+    
+    <Border Background="#121214" BorderBrush="#2A2A2E" BorderThickness="1.5" CornerRadius="12">
+        <Grid Margin="15">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" /> <!-- Header -->
+                <RowDefinition Height="*" />    <!-- Content -->
+                <RowDefinition Height="Auto" /> <!-- Footer -->
+            </Grid.RowDefinitions>
+
+            <!-- Header -->
+            <Grid Grid.Row="0" MouseLeftButtonDown="Header_MouseLeftButtonDown" Background="Transparent" Height="30">
+                <TextBlock Text="SCOPE OVERLAY SETTINGS" Foreground="#ECEFF1" FontSize="13" FontWeight="Bold" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                <Button Content="✕" Click="Close_Click" Foreground="#90A4AE" Background="Transparent" BorderThickness="0" FontSize="16" HorizontalAlignment="Right" VerticalAlignment="Center" Cursor="Hand" Width="30" Height="30">
+                    <Button.Style>
+                        <Style TargetType="Button">
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="Button">
+                                        <Border Background="{TemplateBinding Background}">
+                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                            <Style.Triggers>
+                                <Trigger Property="IsMouseOver" Value="True">
+                                    <Setter Property="Foreground" Value="#FF1744"/>
+                                </Trigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Button.Style>
+                </Button>
+            </Grid>
+
+            <!-- Divider -->
+            <Separator Grid.Row="0" VerticalAlignment="Bottom" Background="#263238" Height="1" Margin="0,35,0,0" />
+
+            <!-- Content ScrollViewer for setting cards -->
+            <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,15,0,10">
+                <StackPanel>
+                    <!-- Scope Size & Zoom Card -->
+                    <Border Background="#1A1A1E" CornerRadius="8" Padding="12" BorderThickness="1" BorderBrush="#252528" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="Zoom &amp; Dimensions" Foreground="#80DEEA" FontWeight="SemiBold" FontSize="11" Margin="0,0,0,10" />
+                            
+                            <!-- Zoom Factor Slider -->
+                            <Grid Margin="0,5">
+                                <TextBlock Text="Zoom Level:" Foreground="#CFD8DC" FontSize="11" HorizontalAlignment="Left" />
+                                <TextBlock x:Name="TxtZoom" Text="2x" Foreground="#80DEEA" FontSize="11" HorizontalAlignment="Right" FontWeight="Bold" />
+                            </Grid>
+                            <Slider x:Name="SldZoom" Minimum="2" Maximum="8" TickFrequency="1" IsSnapToTickEnabled="True" Value="2" ValueChanged="SettingsChanged" Margin="0,0,0,10" />
+
+                            <!-- Scope Size Slider -->
+                            <Grid Margin="0,5">
+                                <TextBlock Text="Scope Size (px):" Foreground="#CFD8DC" FontSize="11" HorizontalAlignment="Left" />
+                                <TextBlock x:Name="TxtSize" Text="100" Foreground="#80DEEA" FontSize="11" HorizontalAlignment="Right" FontWeight="Bold" />
+                            </Grid>
+                            <Slider x:Name="SldSize" Minimum="60" Maximum="350" TickFrequency="5" IsSnapToTickEnabled="True" Value="100" ValueChanged="SettingsChanged" Margin="0,0,0,5" />
+
+                            <!-- Show Border Checkbox -->
+                            <CheckBox x:Name="ChkBorder" Content="Show Scope Outer Border" Checked="SettingsChanged" Unchecked="SettingsChanged" Foreground="#CFD8DC" Margin="0,8,0,0" FontSize="11" VerticalContentAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Crosshair/Dot Card -->
+                    <Border Background="#1A1A1E" CornerRadius="8" Padding="12" BorderThickness="1" BorderBrush="#252528" Margin="0,0,0,12">
+                        <StackPanel>
+                            <TextBlock Text="Center Crosshair Visuals" Foreground="#80DEEA" FontWeight="SemiBold" FontSize="11" Margin="0,0,0,10" />
+
+                            <!-- Crosshair Style -->
+                            <Grid Margin="0,5">
+                                <TextBlock Text="Style:" Foreground="#CFD8DC" FontSize="11" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                <ComboBox x:Name="CboStyle" HorizontalAlignment="Right" Width="140" SelectionChanged="SettingsChanged" Background="#25252A" Foreground="#25252A" BorderBrush="#3A3A40" FontSize="11">
+                                    <ComboBoxItem Content="Dot" Tag="Dot" IsSelected="True" />
+                                    <ComboBoxItem Content="Circle" Tag="Circle" />
+                                    <ComboBoxItem Content="Cross" Tag="Cross" />
+                                    <ComboBoxItem Content="Dot &amp; Circle" Tag="DotCircle" />
+                                    <ComboBoxItem Content="None" Tag="None" />
+                                </ComboBox>
+                            </Grid>
+
+                            <!-- Crosshair Size -->
+                            <Grid Margin="0,8,0,5">
+                                <TextBlock Text="Crosshair Size / Thickness:" Foreground="#CFD8DC" FontSize="11" HorizontalAlignment="Left" />
+                                <TextBlock x:Name="TxtDotSize" Text="4" Foreground="#80DEEA" FontSize="11" HorizontalAlignment="Right" FontWeight="Bold" />
+                            </Grid>
+                            <Slider x:Name="SldDotSize" Minimum="2" Maximum="20" TickFrequency="0.5" IsSnapToTickEnabled="True" Value="4" ValueChanged="SettingsChanged" Margin="0,0,0,10" />
+
+                            <!-- Crosshair Color (R, G, B) -->
+                            <TextBlock Text="Custom RGB Color:" Foreground="#CFD8DC" FontSize="11" Margin="0,5,0,5" />
+                            
+                            <!-- Red Slider -->
+                            <Grid Margin="0,2">
+                                <TextBlock Text="Red" Foreground="#EF9A9A" FontSize="10" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                <Slider x:Name="SldColorR" Minimum="0" Maximum="255" Value="255" ValueChanged="SettingsChanged" Width="220" HorizontalAlignment="Right" />
+                            </Grid>
+                            <!-- Green Slider -->
+                            <Grid Margin="0,2">
+                                <TextBlock Text="Green" Foreground="#A5D6A7" FontSize="10" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                <Slider x:Name="SldColorG" Minimum="0" Maximum="255" Value="0" ValueChanged="SettingsChanged" Width="220" HorizontalAlignment="Right" />
+                            </Grid>
+                            <!-- Blue Slider -->
+                            <Grid Margin="0,2">
+                                <TextBlock Text="Blue" Foreground="#9FA8DA" FontSize="10" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                <Slider x:Name="SldColorB" Minimum="0" Maximum="255" Value="0" ValueChanged="SettingsChanged" Width="220" HorizontalAlignment="Right" />
+                            </Grid>
+
+                            <!-- Color Preview Box -->
+                            <Grid Margin="0,10,0,0">
+                                <TextBlock Text="Color Preview:" Foreground="#CFD8DC" FontSize="11" HorizontalAlignment="Left" VerticalAlignment="Center" />
+                                <Border x:Name="BdrColorPreview" Width="40" Height="20" HorizontalAlignment="Right" Background="Red" CornerRadius="3" BorderBrush="#CFD8DC" BorderThickness="1" />
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- System & Capture Card -->
+                    <Border Background="#1A1A1E" CornerRadius="8" Padding="12" BorderThickness="1" BorderBrush="#252528">
+                        <StackPanel>
+                            <TextBlock Text="System Options" Foreground="#80DEEA" FontWeight="SemiBold" FontSize="11" Margin="0,0,0,10" />
+                            <CheckBox x:Name="ChkExcludeCapture" Content="Hide from screenshots (OBS/Discord)" Checked="SettingsChanged" Unchecked="SettingsChanged" Foreground="#CFD8DC" FontSize="11" VerticalContentAlignment="Center" />
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- Footer Buttons -->
+            <Grid Grid.Row="2" Margin="0,5,0,0" Height="40">
+                <Button Content="Save &amp; Close" Click="Close_Click" Width="120" Height="28" HorizontalAlignment="Right" Background="#00B0FF" Foreground="#121214" FontWeight="Bold" BorderThickness="0" Cursor="Hand" VerticalAlignment="Center">
+                    <Button.Resources>
+                        <Style TargetType="Border">
+                            <Setter Property="CornerRadius" Value="4"/>
+                        </Style>
+                    </Button.Resources>
+                </Button>
+                <TextBlock Text="Hotkey: Ctrl+Shift+S to toggle settings" Foreground="#90A4AE" FontSize="10" VerticalAlignment="Center" HorizontalAlignment="Left" />
+            </Grid>
+        </Grid>
+    </Border>
+</Window>

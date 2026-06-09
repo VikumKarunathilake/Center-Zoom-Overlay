@@ -20,18 +20,40 @@
                 BorderThickness="1"
                 CornerRadius="50">
             <Border.Clip>
-                <EllipseGeometry Center="50,50" RadiusX="50" RadiusY="50" />
+                <EllipseGeometry x:Name="ScopeClipGeometry" Center="50,50" RadiusX="50" RadiusY="50" />
             </Border.Clip>
             <Image x:Name="ZoomDisplay"
                    Stretch="Fill"
                    RenderOptions.BitmapScalingMode="Linear"/>
         </Border>
 
-        <Ellipse Width="4"
-                 Height="4"
-                 Fill="Red"
-                 HorizontalAlignment="Center"
-                 VerticalAlignment="Center"/>
+        <!-- Dynamic Crosshair Elements -->
+        <Grid x:Name="CrosshairContainer" HorizontalAlignment="Center" VerticalAlignment="Center">
+            <!-- Center Dot Style -->
+            <Ellipse x:Name="CrosshairDot"
+                     Fill="Red"
+                     Width="4"
+                     Height="4"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     Visibility="Visible"/>
+
+            <!-- Circle Style -->
+            <Ellipse x:Name="CrosshairCircle"
+                     Stroke="Red"
+                     StrokeThickness="1.5"
+                     Width="12"
+                     Height="12"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     Visibility="Collapsed"/>
+
+            <!-- Cross Style -->
+            <Grid x:Name="CrosshairCross" Visibility="Collapsed" Width="16" Height="16">
+                <Line x:Name="LineH" X1="0" Y1="8" X2="16" Y2="8" Stroke="Red" StrokeThickness="1.5"/>
+                <Line x:Name="LineV" X1="8" Y1="0" X2="8" Y2="16" Stroke="Red" StrokeThickness="1.5"/>
+            </Grid>
+        </Grid>
     </Grid>
 
 </Window>

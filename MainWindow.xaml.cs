@@ -51,6 +51,9 @@ namespace Center_Zoom_Overlay
         private const int MaxZoom = 8;
         private bool _isZoomToggled = true; // True = zoomed, False = 1x (no zoom)
 
+        public AppSettings CurrentSettings { get; private set; }
+        public event Action<int> ZoomFactorChangedExternally;
+
         private int _captureWidth;
         private int _captureHeight;
 
@@ -94,31 +97,16 @@ namespace Center_Zoom_Overlay
             _dpiX = ps?.CompositionTarget?.TransformToDevice.M11 ?? 1.0;
             _dpiY = ps?.CompositionTarget?.TransformToDevice.M22 ?? 1.0;
 
-            // Physical size of our window on the screen
-            _windowPxW = (int)(Width * _dpiX);
-            _windowPxH = (int)(Height * _dpiY);
-
-            // Set up initial buffer sizes
-            UpdateZoomBuffers();
-
             // Get the window handle (hwnd)
             IntPtr hwnd = new WindowInteropHelper(this).Handle;
-
-            // --- Position the window exactly in the physical screen center ---
-            int screenW = GetSystemMetrics(SM_CXSCREEN);
-            int screenH = GetSystemMetrics(SM_CYSCREEN);
-            int left = (screenW - _windowPxW) / 2;
-            int top = (screenH - _windowPxH) / 2;
-
-            // Set screen coordinates using Win32 to bypass any WPF DPI-scaling layout issues
-            SetWindowPos(hwnd, new IntPtr(-1), (int)(left / _dpiX), (int)(top / _dpiY), (int)Width, (int)Height, 0x0040);
 
             // --- Apply click-through so the overlay never eats game input ---
             int style = GetWindowLong(hwnd, GWL_EXSTYLE);
             SetWindowLong(hwnd, GWL_EXSTYLE, style | WS_EX_TRANSPARENT | WS_EX_LAYERED);
 
-            // --- Exclude this window from screen capture to prevent recursive feedback zooming ---
-            SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE);
+            // Load and apply settings
+            AppSettings settings = SettingsManager.Load();
+            ApplySettings(settings);
 
             // --- Register Global Hotkeys (PageUp & PageDown / NumPad Plus & Minus) ---
             // Modifiers: 0x0000 = None, 0x0001 = Alt, 0x0002 = Control, 0x0004 = Shift, 0x0008 = Windows
@@ -127,12 +115,11 @@ namespace Center_Zoom_Overlay
             RegisterHotKey(hwnd, HOTKEY_ZOOM_DOWN_PGDN, 0x0000, VK_NEXT);    // Page Down
             RegisterHotKey(hwnd, HOTKEY_ZOOM_UP_NUM, 0x0000, VK_ADD);        // Numpad +
             RegisterHotKey(hwnd, HOTKEY_ZOOM_DOWN_NUM, 0x0000, VK_SUBTRACT); // Numpad -
+            RegisterHotKey(hwnd, HOTKEY_TOGGLE_SETTINGS, 0x0006, VK_S);      // Ctrl + Shift + S
 
             // Intercept messages to process hotkeys
             HwndSource source = HwndSource.FromHwnd(hwnd);
             source?.AddHook(HwndMessageHook);
-
-
 
             // --- Start the background capture thread ---
             _isRunning = true;
@@ -168,11 +155,13 @@ namespace Center_Zoom_Overlay
         private const int HOTKEY_ZOOM_DOWN_PGDN = 9002;
         private const int HOTKEY_ZOOM_UP_NUM = 9003;
         private const int HOTKEY_ZOOM_DOWN_NUM = 9004;
+        private const int HOTKEY_TOGGLE_SETTINGS = 9005;
 
         private const uint VK_PRIOR = 0x21;    // Page Up
         private const uint VK_NEXT = 0x22;     // Page Down
         private const uint VK_ADD = 0x6B;      // Numpad +
         private const uint VK_SUBTRACT = 0x6D; // Numpad -
+        private const uint VK_S = 0x53;        // S key
         private const int WM_HOTKEY = 0x0312;
 
         private IntPtr HwndMessageHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -201,11 +190,143 @@ namespace Center_Zoom_Overlay
 
                 if (zoomChanged)
                 {
+                    if (CurrentSettings != null)
+                    {
+                        CurrentSettings.ZoomFactor = _zoomFactor;
+                        SettingsManager.Save(CurrentSettings);
+                    }
                     UpdateZoomBuffers();
+                    ZoomFactorChangedExternally?.Invoke(_zoomFactor);
+                }
+                else if (id == HOTKEY_TOGGLE_SETTINGS)
+                {
+                    Dispatcher.BeginInvoke(new Action(() =>
+                    {
+                        ((App)Application.Current).ToggleSettingsWindow();
+                    }));
                 }
                 handled = true;
             }
             return IntPtr.Zero;
+        }
+
+        public void ApplySettings(AppSettings settings)
+        {
+            CurrentSettings = settings;
+
+            // Exclude from captures if configured
+            IntPtr hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd != IntPtr.Zero)
+            {
+                SetWindowDisplayAffinity(hwnd, settings.ExcludeFromCapture ? WDA_EXCLUDEFROMCAPTURE : WDA_NONE);
+            }
+
+            // Border visibility & styling
+            if (ScopeBorder != null)
+            {
+                ScopeBorder.BorderBrush = settings.ShowBorder
+                    ? new SolidColorBrush(System.Windows.Media.Color.FromArgb(0x80, 0x80, 0x80, 0x80))
+                    : new SolidColorBrush(System.Windows.Media.Colors.Transparent);
+            }
+
+            // Scope Size (Window dimensions)
+            double size = settings.ScopeSize;
+            this.Width = size;
+            this.Height = size;
+
+            // Clip geometry centering & corner radius
+            double halfSize = size / 2;
+            if (ScopeClipGeometry != null)
+            {
+                ScopeClipGeometry.Center = new System.Windows.Point(halfSize, halfSize);
+                ScopeClipGeometry.RadiusX = halfSize;
+                ScopeClipGeometry.RadiusY = halfSize;
+            }
+            if (ScopeBorder != null)
+            {
+                ScopeBorder.CornerRadius = new CornerRadius(halfSize);
+            }
+
+            // Zoom level
+            _zoomFactor = settings.ZoomFactor;
+
+            // Crosshair update
+            System.Windows.Media.Color color = System.Windows.Media.Color.FromRgb(
+                (byte)settings.CrosshairColorR,
+                (byte)settings.CrosshairColorG,
+                (byte)settings.CrosshairColorB);
+            SolidColorBrush brush = new SolidColorBrush(color);
+
+            CrosshairDot.Visibility = Visibility.Collapsed;
+            CrosshairCircle.Visibility = Visibility.Collapsed;
+            CrosshairCross.Visibility = Visibility.Collapsed;
+
+            double dotSize = settings.DotSize;
+            string style = settings.CrosshairStyle;
+
+            if (style == "Dot")
+            {
+                CrosshairDot.Visibility = Visibility.Visible;
+                CrosshairDot.Width = dotSize;
+                CrosshairDot.Height = dotSize;
+                CrosshairDot.Fill = brush;
+            }
+            else if (style == "Circle")
+            {
+                CrosshairCircle.Visibility = Visibility.Visible;
+                CrosshairCircle.Width = dotSize * 2.5;
+                CrosshairCircle.Height = dotSize * 2.5;
+                CrosshairCircle.Stroke = brush;
+                CrosshairCircle.StrokeThickness = Math.Max(1.0, dotSize / 4);
+            }
+            else if (style == "Cross")
+            {
+                CrosshairCross.Visibility = Visibility.Visible;
+                double crossSize = dotSize * 3;
+                CrosshairCross.Width = crossSize;
+                CrosshairCross.Height = crossSize;
+                LineH.X1 = 0; LineH.Y1 = crossSize / 2; LineH.X2 = crossSize; LineH.Y2 = crossSize / 2;
+                LineV.X1 = crossSize / 2; LineV.Y1 = 0; LineV.X2 = crossSize / 2; LineV.Y2 = crossSize;
+                LineH.Stroke = brush;
+                LineH.StrokeThickness = Math.Max(1.0, dotSize / 4);
+                LineV.Stroke = brush;
+                LineV.StrokeThickness = Math.Max(1.0, dotSize / 4);
+            }
+            else if (style == "DotCircle")
+            {
+                CrosshairDot.Visibility = Visibility.Visible;
+                CrosshairDot.Width = dotSize;
+                CrosshairDot.Height = dotSize;
+                CrosshairDot.Fill = brush;
+
+                CrosshairCircle.Visibility = Visibility.Visible;
+                CrosshairCircle.Width = dotSize * 2.5;
+                CrosshairCircle.Height = dotSize * 2.5;
+                CrosshairCircle.Stroke = brush;
+                CrosshairCircle.StrokeThickness = Math.Max(1.0, dotSize / 4);
+            }
+
+            // Re-calculate window physical pixels based on current DPI
+            _windowPxW = (int)(this.Width * _dpiX);
+            _windowPxH = (int)(this.Height * _dpiY);
+
+            // Re-center window using Win32 API
+            if (hwnd != IntPtr.Zero)
+            {
+                int screenW = GetSystemMetrics(SM_CXSCREEN);
+                int screenH = GetSystemMetrics(SM_CYSCREEN);
+                int left = (screenW - _windowPxW) / 2;
+                int top = (screenH - _windowPxH) / 2;
+                SetWindowPos(hwnd, new IntPtr(-1), (int)(left / _dpiX), (int)(top / _dpiY), (int)this.Width, (int)this.Height, 0x0040);
+            }
+
+            UpdateZoomBuffers();
+        }
+
+        public void ToggleZoomState()
+        {
+            _isZoomToggled = !_isZoomToggled;
+            UpdateZoomBuffers();
         }
 
         private void UpdateZoomBuffers()
@@ -235,8 +356,7 @@ namespace Center_Zoom_Overlay
                 _pixelBufferStride = _captureWidth * 4;
                 _pixelBuffer = new byte[_pixelBufferStride * _captureHeight];
 
-                // Create WriteableBitmap on the UI thread
-                Dispatcher.Invoke(() =>
+                Action updateAction = () =>
                 {
                     _writeableBitmap = new WriteableBitmap(
                         _captureWidth,
@@ -252,7 +372,16 @@ namespace Center_Zoom_Overlay
                     {
                         ScopeBorder.Visibility = _isZoomToggled ? Visibility.Visible : Visibility.Collapsed;
                     }
-                });
+                };
+
+                if (Dispatcher.CheckAccess())
+                {
+                    updateAction();
+                }
+                else
+                {
+                    Dispatcher.Invoke(updateAction);
+                }
             }
         }
 
@@ -273,6 +402,7 @@ namespace Center_Zoom_Overlay
             UnregisterHotKey(hwnd, HOTKEY_ZOOM_DOWN_PGDN);
             UnregisterHotKey(hwnd, HOTKEY_ZOOM_UP_NUM);
             UnregisterHotKey(hwnd, HOTKEY_ZOOM_DOWN_NUM);
+            UnregisterHotKey(hwnd, HOTKEY_TOGGLE_SETTINGS);
 
             lock (_bufferLock)
             {
