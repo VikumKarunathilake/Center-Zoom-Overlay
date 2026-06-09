@@ -35,8 +35,8 @@ jobs:
         New-Item -ItemType Directory -Path .\publish
         
         # Copy executable and dependency DLL
-        Copy-Item -Path .\bin\Release\Center-Zoom-Overlay.exe -Destination .\publish\
-        Copy-Item -Path .\bin\Release\System.Drawing.Common.dll -Destination .\publish\
+        Copy-Item -Path .\bin\Release\net472\Center-Zoom-Overlay.exe -Destination .\publish\
+        Copy-Item -Path .\bin\Release\net472\System.Drawing.Common.dll -Destination .\publish\
         
         # Zip the package
         Compress-Archive -Path .\publish\* -DestinationPath .\Center-Zoom-Overlay.zip
@@ -47,6 +47,6 @@ jobs:
         tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'manual-release' }}
         files: |
           Center-Zoom-Overlay.zip
-          bin/Release/Center-Zoom-Overlay.exe
+          bin/Release/net472/Center-Zoom-Overlay.exe
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
