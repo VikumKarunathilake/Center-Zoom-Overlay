@@ -31,3 +31,5 @@ packages/
 # Rider/Resharper folders
 .idea/
 *.sln.iml
+config.bat
+node_modules
